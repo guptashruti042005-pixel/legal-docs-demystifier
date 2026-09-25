@@ -31,6 +31,7 @@ const AnalysisSchema = new mongoose.Schema({
     default: 'low'
   },
   analysis: {
+    documentType: { type: String, default: 'General Legal Document' },
     executiveSummary: { type: String, default: '' },
     plainLanguageSummary: { type: String, default: '' },
     riskLevel: { type: String, default: 'low' },
@@ -42,10 +43,24 @@ const AnalysisSchema = new mongoose.Schema({
     missingClauses: { type: [mongoose.Schema.Types.Mixed], default: [] },
     recommendations: { type: [mongoose.Schema.Types.Mixed], default: [] },
     atsScore: { type: Number, default: null },
+    atsScoreBreakdown: { type: mongoose.Schema.Types.Mixed, default: {} },
+    atsAssessment: { type: String, default: '' },
+    skills: { type: [String], default: [] },
     extractedSkills: { type: [String], default: [] },
-    resumeFeedback: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    matchedSkills: { type: [String], default: [] },
+    missingSkills: { type: [String], default: [] },
+    personalInfo: { type: mongoose.Schema.Types.Mixed, default: {} },
     contactInfo: { type: mongoose.Schema.Types.Mixed, default: {} },
+    education: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    experience: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    projects: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    certifications: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    achievements: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    otherSections: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    jobDescriptionMatch: { type: mongoose.Schema.Types.Mixed, default: null },
+    resumeFeedback: { type: mongoose.Schema.Types.Mixed, default: {} },
     actionItems: { type: [String], default: [] },
+    suggestions: { type: [String], default: [] },
     hiddenCaveats: { type: [String], default: [] }
   },
   rawOutput: mongoose.Schema.Types.Mixed, // Storing raw output for debugging

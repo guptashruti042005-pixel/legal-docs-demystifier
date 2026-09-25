@@ -1,19 +1,21 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { runOfflineAnalysis } = require('../../../services/analysisEngine');
+const resumeParser = require('../resume/resumeParser.service');
+const legalAnalysisService = require('../legal/legalAnalysis.service');
 
 class AIService {
   constructor() {
     this.primaryProvider = process.env.PRIMARY_AI_PROVIDER || 'gemini'; // 'gemini' | 'openai'
-    this.geminiModelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    this.geminiModelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
     this.openaiModelName = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   }
 
-  getGeminiModel(systemInstruction = '') {
+  getGeminiModel(systemInstruction = '', modelName = null) {
     if (!process.env.GEMINI_API_KEY) return null;
     try {
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
       return genAI.getGenerativeModel({
-        model: this.geminiModelName,
+        model: modelName || this.geminiModelName,
         ...(systemInstruction ? { systemInstruction } : {})
       });
     } catch (err) {
@@ -57,9 +59,9 @@ class AIService {
   /**
    * Main analysis execution. Tries primary provider, falls back to secondary, then to offline.
    */
-  async analyzeDocument(retrievedChunksText, persona = 'default', fileName = 'document', jobDescription = '') {
+  async analyzeDocument(retrievedChunksText, persona = 'default', fileName = 'document', jobDescription = '', documentType = 'general') {
     const personaInstructions = {
-      student: 'Explain concepts simply as if to a university student. Define legal terms, provide educational context, and make it easy to understand.',
+      student: 'Explain concepts simply as if to a university student. Define terms clearly, provide educational context, and make it easy to understand.',
       business: 'Focus on business implications, financial impacts, and operational considerations for an entrepreneur or business owner.',
       lawyer: 'Provide technical legal analysis with references to relevant legal principles, potential precedents, and professional considerations.',
       senior: 'Use very clear, patient language. Focus on protecting rights, identifying potential pitfalls, and ensuring the person is not taken advantage of.',
@@ -68,96 +70,222 @@ class AIService {
 
     const personaGuide = personaInstructions[persona] || personaInstructions.default;
 
-    const systemPrompt = `You are an expert document analyst specializing in both legal/business contracts and professional resume screening.
-Analyze the provided document segments and return a comprehensive, highly detailed analysis in JSON format.
+    const isResume = (documentType || '').toLowerCase() === 'resume'
+      || (documentType || '').toLowerCase().includes('resume')
+      || (documentType || '').toLowerCase().includes('cv')
+      || (fileName || '').toLowerCase().includes('resume')
+      || (fileName || '').toLowerCase().includes('cv');
+
+    let systemPrompt = '';
+    let userPrompt = '';
+
+    if (isResume) {
+      systemPrompt = `You are an expert HR recruiter, career coach, and ATS (Applicant Tracking System) screening specialist.
+Analyze the provided candidate resume segments and return a comprehensive, highly detailed resume evaluation in JSON format.
 
 Strict Rules for Analysis:
-1. Analyze ONLY the provided document content. Do not make assumptions or project outside of it.
-2. NEVER invent clauses, experience, credentials, or facts.
-3. NEVER assume missing information.
-4. If a piece of information or clause is not present in the document segments, return "Information Not Found In Document" instead of generating assumptions.
-5. Quote supporting text from the document for your findings.
-6. Explain all findings in simple language.
-7. Assign risk levels: Low, Medium, High.
-8. For every risk detected (for contracts/agreements):
-   - Quote the clause.
-   - Explain the risk.
-   - Explain the consequences.
-   - Assign severity (low, medium, high).
-9. Dynamic Classification: Detect if the uploaded document is a Resume/CV or an Agreement/Contract.
-   - If it is a Resume/CV:
-     - Compare candidate's experience, education, and keywords against the target Job Description (if provided). If no Job Description is provided, score it against top industry standards.
-     - Calculate an ATS compatibility score from 0 to 100.
-     - Extract technical and soft skills into "extractedSkills".
-     - Provide granular "resumeFeedback" with constructive issues and concrete suggestions for changes/improvements.
-     - Extract name, email, phone, and website/LinkedIn links into "contactInfo".
-   - If it is a Legal or Business Document:
-     - Extract key clauses, financial obligations, important dates, and missing clauses.
-     - Formulate a chronological day-to-day checkable task list of "actionItems".
-     - Expose tricky, hidden, or non-standard provisions as "hiddenCaveats" (e.g. autodebits, hidden interest, termination penalties).
-10. Ensure both the "executiveSummary" and "plainLanguageSummary" are highly detailed and verbose (at least 250-400 words each), giving deep, meaningful explanations.
-11. Fill fields that are completely irrelevant to the document type with appropriate null, empty arrays [], or empty objects {} (e.g., if it is a resume, return empty array for financialObligations; if it is a contract, return null for atsScore).`;
+1. Analyze ONLY the provided resume content. Do not invent experience, skills, degrees, or certifications not present in the document.
+2. If information is not found in the document, use empty string "" or empty array [].
+3. Calculate an accurate, objective ATS compatibility score (0-100) based on relevance, completeness, keywords, structure, and readability.
+   - If a target Job Description is provided, factor in keyword match, required skills, and qualification overlap against the Job Description.
+   - If no Job Description is provided, evaluate against general industry standards and set "jobDescriptionMatch" to null.
+4. Extract canonical technical and domain skills into "skills".
+5. Extract projects with their technologies, descriptions, and URLs into "projects".
+6. Extract candidate contact info into "personalInfo": { "name": string, "email": string, "phone": string, "location": string, "linkedin": string, "github": string, "portfolio": string, "otherLinks": string[] }.
+   - Never classify software libraries or technologies (such as Socket.io, Node.js, Express.js, React.js, MySQL) as personal websites.
+   - Never classify email domains (such as gmail.com) as personal websites.
+7. Extract education history into "education": array of objects { "institution": string, "degree": string, "field": string, "year": string, "score": string }.
+8. Extract work experience into "experience": array of objects { "role": string, "company": string, "location": string, "duration": string, "description": string[] }.
+9. Extract certifications into "certifications": array of objects { "name": string, "issuer": string, "date": string, "credentialUrl": string }.
+10. Extract achievements into "achievements": array of strings.
+11. Provide granular, constructive "resumeFeedback" with { "strengths": string[], "improvements": string[], "atsChecklist": [ { "item": string, "passed": boolean } ] }.
+12. Write a verbose, detailed "executiveSummary" (200-350 words) highlighting candidate core competencies, strengths, and background.
+13. Write a verbose, detailed "plainLanguageSummary" (250-400 words) giving an honest breakdown of the candidate's qualifications, market positioning, and growth areas.
+14. THIS IS A RESUME / CV. NEVER GENERATE ANY CONTRACTUAL CLAUSES, PAYMENT PENALTIES, TERMINATION, GOVERNING LAW, OR FORCE MAJEURE CLAUSES. Leave contract fields empty: "importantClauses": [], "redFlags": [], "financialObligations": [], "importantDates": [], "missingClauses": [], "hiddenCaveats": [].
+15. Set "documentType": "Resume / CV". Set "riskLevel": "low" (or "medium" if major structural gaps exist).`;
 
-    const userPrompt = `DOCUMENT (filename: ${fileName}):
+      userPrompt = `RESUME DOCUMENT (filename: ${fileName}):
 """
 ${retrievedChunksText}
 """
 
-TARGET JOB DESCRIPTION (Use only if relevant/provided):
+TARGET JOB DESCRIPTION (Compare against this if provided):
 """
-${jobDescription}
+${jobDescription || 'No specific job description provided. Evaluate against modern industry standards for this candidate profile.'}
 """
 
 PERSONA TARGET: ${personaGuide}
 
 Return ONLY valid JSON in this exact structure (do not wrap in markdown \`\`\`json block, return pure JSON):
 {
-  "documentType": "Resume | Lease Agreement | Terms of Service | etc.",
+  "documentType": "Resume / CV",
   "language": "English|Hindi",
   "confidenceScore": 0.95,
   "riskLevel": "low|medium|high",
-  "executiveSummary": "Highly detailed, verbose summary of the document tailored to the persona (250-300 words)",
-  "plainLanguageSummary": "Highly detailed, verbose plain language explanation explaining terms tailored to the persona (300-400 words)",
+  "executiveSummary": "Detailed summary of candidate profile, strengths, and background (200-350 words)",
+  "plainLanguageSummary": "Detailed breakdown of qualifications, market positioning, and improvement areas (250-400 words)",
+  "atsScore": 85,
+  "atsScoreBreakdown": {
+    "contact": 10,
+    "sections": 15,
+    "skills": 20,
+    "experience": 17,
+    "education": 10,
+    "projects": 15,
+    "formatting": 8
+  },
+  "atsAssessment": "Objective assessment statement regarding ATS alignment",
+  "personalInfo": {
+    "name": "Full Name",
+    "email": "Email Address",
+    "phone": "Phone Number",
+    "location": "City, State/Country",
+    "linkedin": "LinkedIn profile URL",
+    "github": "GitHub profile URL",
+    "portfolio": "Portfolio URL",
+    "otherLinks": []
+  },
+  "summary": "Candidate professional summary",
+  "skills": ["Skill1", "Skill2", "Skill3"],
+  "projects": [
+    { "name": "Project Name", "technologies": ["Tech1", "Tech2"], "description": ["Key detail or achievement 1"], "url": "URL or empty" }
+  ],
+  "experience": [
+    { "role": "Job Title", "company": "Company Name", "location": "City/Remote", "duration": "Dates/Duration", "description": ["Responsibility or accomplishment 1"] }
+  ],
+  "education": [
+    { "institution": "University/College", "degree": "Degree Title", "field": "Field of Study", "year": "Graduation Year", "score": "CGPA/GPA/Score" }
+  ],
+  "certifications": [
+    { "name": "Certification Name", "issuer": "Issuer Organization", "date": "Date", "credentialUrl": "" }
+  ],
+  "achievements": ["Achievement or award 1"],
+  "jobDescriptionMatch": ${jobDescription && jobDescription.trim().length > 5 ? `{
+    "matchPercentage": 85,
+    "matchedSkills": ["Skill1"],
+    "missingSkills": ["Skill2"],
+    "summary": "Match overview",
+    "suggestions": ["Suggestion 1"]
+  }` : `null`},
+  "resumeFeedback": {
+    "strengths": ["Strength 1", "Strength 2"],
+    "improvements": ["Improvement suggestion 1", "Improvement suggestion 2"],
+    "atsChecklist": [
+      { "item": "Contact information listed", "passed": true },
+      { "item": "Core sections present", "passed": true },
+      { "item": "Technical skills populated", "passed": true }
+    ]
+  },
+  "recommendations": [
+    { "action": "Action to take", "rationale": "Why this action improves candidate prospects" }
+  ],
+  "suggestions": ["Improvement suggestion 1"],
+  "actionItems": ["Task item 1"],
+  "importantClauses": [],
+  "redFlags": [],
+  "financialObligations": [],
+  "importantDates": [],
+  "missingClauses": [],
+  "hiddenCaveats": []
+}`;
+    } else {
+      systemPrompt = `You are an expert legal document and contract analysis engine.
+Analyze the provided document text and return a comprehensive, document-grounded evaluation in JSON format.
+
+Strict Rules for Analysis:
+1. Category Detection: Automatically detect the specific category from the document text (e.g. "Insurance Policy", "Employment Agreement", "Rental / Lease Agreement", "Non-Disclosure Agreement (NDA)", "Service Agreement", "Loan / Credit Agreement", "Terms & Conditions", "General Contract / Agreement"). Never label an insurance policy as generic contract.
+2. Grounded Truth Only: Analyze ONLY text actually present in the document. Quote supporting text verbatim in "excerpt" or "source_text".
+3. Semantic Clause Classification:
+   - Determine the true meaning of each clause from context, not isolated keywords.
+   - If text discusses assignment or transfer of policy/rights to another person or lender, classify it as "Assignment & Transfer of Rights". NEVER classify it as "Payment Terms".
+   - If text contains an Insurance Ombudsman, regulatory authority, or complaint escalation address, classify it as "Grievance Redressal & Ombudsman" or omit it. NEVER classify it as "Confidentiality".
+   - ONLY classify as "Confidentiality & Non-Disclosure" if the document contains genuine non-disclosure obligations, trade secret covenants, or privacy duties.
+4. Financial Obligations:
+   - Extract real financial commitments from context: premiums, maturity benefits, death benefits, surrender values, late fees, penalties, security deposits, interest rates.
+   - Include type, amount/value, unit, description, and source terms.
+   - If no financial metrics exist, return empty array [].
+5. Date & Timeframe Validation:
+   - DO NOT treat telephone numbers, slash-separated extensions (e.g. "25/26/27", "28/28/29"), table coordinates, page numbers, or policy codes (e.g. UIN numbers) as dates!
+   - Only extract legitimate calendar dates or operative timeframes/periods confirmed by context (e.g. "30 days Free Look Period", "15 days Grace Period", "5 years Revival Period", "12 months Suicide Exclusion", "30 days notice").
+6. Real Risks & Red Flags:
+   - Detect material contractual risks: exclusions (e.g. suicide exclusion), policy lapse upon missed premium, surrender value forfeiture, loan foreclosure, non-compete, broad indemnities.
+   - For every risk: include title, severity (high/medium/low), risk explanation, consequences, and verbatim excerpt.
+   - If no material risk exists: state that no material risks were identified in the analyzed clauses; do NOT claim the agreement is "fair".
+7. Document-Grounded Recommendations:
+   - NEVER generate generic contract boilerplate like "Negotiate penalty and late fee" or "Confirm invoice cadence and payment due dates match your cash flow" unless supported by actual text.
+   - Recommendations must be strictly derived from detected clauses (e.g. Free-look window -> review terms within 15/30 days to return for refund; Grace period -> pay within grace period to prevent lapse; Surrender terms -> check surrender value schedule before exit).
+8. Category-Aware Missing Clauses:
+   - Check standard expected safeguards for the detected category (e.g. for an Insurance Policy check for Free-Look Period, Grace Period, Ombudsman; do NOT complain about Force Majeure or Invoicing).
+   - Use truthful wording: "Not identified in the analyzed document."
+9. Summaries: Provide detailed, verbose executiveSummary (250-350 words) and plainLanguageSummary (300-450 words) grounded in the document facts and tailored to the persona.
+10. Contract vs Resume: THIS IS A LEGAL / FINANCIAL / CONTRACT DOCUMENT. Leave resume fields empty/null.`;
+
+      userPrompt = `DOCUMENT CONTENT (filename: ${fileName}):
+"""
+${retrievedChunksText}
+"""
+
+PERSONA TARGET: ${personaGuide}
+
+Return ONLY valid JSON in this exact structure (do not wrap in markdown \`\`\`json block, return pure JSON):
+{
+  "documentType": "Detected Specific Category (e.g. Insurance Policy, Employment Agreement, Rental / Lease Agreement, Non-Disclosure Agreement (NDA), Service Agreement, Loan / Credit Agreement)",
+  "language": "English|Hindi",
+  "confidenceScore": 0.95,
+  "riskLevel": "low|medium|high",
+  "executiveSummary": "Highly detailed, verbose summary of the document tailored to the persona (250-350 words)",
+  "plainLanguageSummary": "Highly detailed, verbose plain language explanation explaining terms tailored to the persona (300-450 words)",
   "importantClauses": [
-    { "title": "Clause Title", "excerpt": "quoted text", "importance": "high|medium|low", "explanation": "explanation" }
+    { "title": "Clause Title", "category": "Category", "excerpt": "quoted text", "importance": "high|medium|low", "explanation": "explanation" }
   ],
   "redFlags": [
     { "title": "Flag Name", "excerpt": "quoted text", "severity": "high|medium|low", "risk": "risk details", "consequences": "consequences if signed" }
   ],
   "financialObligations": [
-    { "description": "Payment / penalty detail", "amount": "INR 50,000 / Information Not Found In Document", "terms": "payment terms text" }
+    { "type": "Obligation Type", "description": "Payment / Benefit / Penalty detail", "amount": "Amount or formula", "unit": "INR / % / etc.", "terms": "source terms text" }
   ],
   "importantDates": [
-    { "description": "Due date / notice period", "date": "date string / Information Not Found In Document", "significance": "why it is important" }
+    { "date": "Date or Period (e.g. 30 days Free Look)", "significance": "Significance of deadline", "impact": "Operational impact" }
   ],
   "missingClauses": [
-    { "clause": "Clause Name", "explanation": "Why it is missing and why it should be there" }
+    { "clause": "Clause Name", "explanation": "Not identified in the analyzed document. Explanation of standard safeguard" }
   ],
   "recommendations": [
-    { "action": "Actionable item", "rationale": "Why this action should be taken" }
+    { "action": "Actionable item", "rationale": "Why this action should be taken", "source_clause": "Clause Name", "priority": "high|medium|low" }
   ],
-  "atsScore": 85,
-  "extractedSkills": ["Skill1", "Skill2"],
-  "resumeFeedback": [
-    { "category": "Formatting|Skills Match|Content Impact", "issue": "flaw details", "suggestion": "how to improve" }
-  ],
-  "contactInfo": { "name": "Full Name", "email": "Email Address", "phone": "Phone Number", "links": "URLs" },
   "actionItems": ["Task item 1", "Task item 2"],
-  "hiddenCaveats": ["Tricky caveat 1", "Tricky caveat 2"]
+  "hiddenCaveats": ["Tricky caveat 1", "Tricky caveat 2"],
+  "atsScore": null,
+  "extractedSkills": [],
+  "matchedSkills": [],
+  "missingSkills": [],
+  "education": [],
+  "experience": [],
+  "jobDescriptionMatch": null,
+  "resumeFeedback": null,
+  "contactInfo": {}
 }`;
+    }
 
-    // Try Gemini Primary
+    // Try Gemini Primary (with candidate model retry on 503 temporary demand spikes)
     if (this.primaryProvider === 'gemini' && process.env.GEMINI_API_KEY) {
-      try {
-        console.log('Sending request to Gemini...');
-        const model = this.getGeminiModel(systemPrompt);
-        if (model) {
-          const result = await model.generateContent(userPrompt);
-          const responseText = result.response.text();
-          return this.cleanAndParseJSON(responseText);
+      const candidateModels = [this.geminiModelName, 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
+      for (const mName of candidateModels) {
+        try {
+          console.log(`Sending request to Gemini (${mName})...`);
+          const model = this.getGeminiModel(systemPrompt, mName);
+          if (model) {
+            const result = await model.generateContent(userPrompt);
+            const responseText = result.response.text();
+            const parsed = this.cleanAndParseJSON(responseText);
+            return this.normalizeAnalysisResult(parsed, isResume, documentType, retrievedChunksText, jobDescription, persona, fileName);
+          }
+        } catch (err) {
+          console.warn(`Gemini (${mName}) attempt failed:`, err.message);
+          if (err.message && (err.message.includes('503') || err.message.includes('429'))) {
+            await new Promise(r => setTimeout(r, 1200));
+          }
         }
-      } catch (err) {
-        console.warn('Gemini primary failed. Attempting OpenAI fallback...', err.message);
       }
     }
 
@@ -166,7 +294,8 @@ Return ONLY valid JSON in this exact structure (do not wrap in markdown \`\`\`js
       try {
         console.log('Sending request to OpenAI...');
         const responseText = await this.callOpenAI(systemPrompt, userPrompt);
-        return this.cleanAndParseJSON(responseText);
+        const parsed = this.cleanAndParseJSON(responseText);
+        return this.normalizeAnalysisResult(parsed, isResume, documentType, retrievedChunksText, jobDescription, persona, fileName);
       } catch (err) {
         console.warn('OpenAI fallback failed. Falling back to offline model...', err.message);
       }
@@ -179,7 +308,8 @@ Return ONLY valid JSON in this exact structure (do not wrap in markdown \`\`\`js
         const model = this.getGeminiModel();
         if (model) {
           const result = await model.generateContent([systemPrompt, userPrompt]);
-          return this.cleanAndParseJSON(result.response.text());
+          const parsed = this.cleanAndParseJSON(result.response.text());
+          return this.normalizeAnalysisResult(parsed, isResume, documentType, retrievedChunksText, jobDescription, persona, fileName);
         }
       } catch (err) {
         console.warn('Gemini alternate fallback failed:', err.message);
@@ -188,28 +318,68 @@ Return ONLY valid JSON in this exact structure (do not wrap in markdown \`\`\`js
 
     // Offline Local Engine Fallback
     console.log('Using Offline Local Fallback Engine...');
-    const result = runOfflineAnalysis(retrievedChunksText, persona, fileName);
-    // Flatten result to match output structure
-    return {
-      documentType: result.documentType,
-      language: result.language,
-      confidenceScore: result.confidence,
-      riskLevel: result.summary.riskLevel,
-      executiveSummary: result.summary.title + ': ' + result.summary.overview,
-      plainLanguageSummary: result.summary.keyFindings.join('\n'),
-      importantClauses: result.keyClauses.map(c => ({ title: c.title, excerpt: c.text, importance: c.importance, explanation: c.explanation })),
-      redFlags: result.redFlags.map(rf => ({ title: rf.title, excerpt: 'Information Not Found In Document', severity: rf.severity, risk: rf.description, consequences: 'Information Not Found In Document' })),
-      financialObligations: result.highlights.amounts.map(a => ({ description: 'Monetary figure found', amount: a, terms: 'Refer to original text' })),
-      importantDates: result.highlights.dates.map(d => ({ description: 'Date mentioned', date: d, significance: 'Key schedule marker' })),
-      missingClauses: [{ clause: 'Force Majeure', explanation: 'Not detected in rule-based offline search' }],
-      recommendations: result.actionItems.map(act => ({ action: act, rationale: 'Recommended offline task' })),
-      atsScore: null,
-      extractedSkills: [],
-      resumeFeedback: [],
-      contactInfo: {},
-      actionItems: result.actionItems.map(act => `Todo: ${act}`) || [],
-      hiddenCaveats: []
-    };
+    if (isResume) {
+      const validated = resumeParser.parseFromText(retrievedChunksText, jobDescription);
+      return {
+        ...validated,
+        documentType: 'Resume / CV',
+        language: 'English',
+        confidenceScore: 0.85,
+        riskLevel: validated.atsScore >= 75 ? 'low' : validated.atsScore >= 50 ? 'medium' : 'high',
+        executiveSummary: `Resume analysis for candidate ${validated.personalInfo?.name || fileName}. Extracted ${validated.skills?.length || 0} core technical and domain skills across competencies. Overall ATS Compatibility score calculated at ${validated.atsScore}%.`,
+        plainLanguageSummary: Array.isArray(validated.resumeFeedback?.improvements) && validated.resumeFeedback.improvements.length > 0 
+          ? `Key areas for enhancement: ${validated.resumeFeedback.improvements.join(' ')}` 
+          : 'Candidate qualifications and career profile evaluated.',
+        contactInfo: validated.personalInfo,
+        extractedSkills: validated.skills,
+        matchedSkills: validated.jobDescriptionMatch?.matchedSkills || [],
+        missingSkills: validated.jobDescriptionMatch?.missingSkills || [],
+        recommendations: (validated.resumeFeedback?.improvements || []).map(imp => ({ action: imp, rationale: 'Actionable ATS and recruiter enhancement' })),
+        actionItems: validated.resumeFeedback?.improvements || [],
+        suggestions: validated.resumeFeedback?.improvements || [],
+        importantClauses: [],
+        redFlags: [],
+        financialObligations: [],
+        importantDates: [],
+        missingClauses: [],
+        hiddenCaveats: []
+      };
+    }
+
+    return legalAnalysisService.parseFromText(retrievedChunksText, persona, fileName, documentType);
+  }
+
+  /**
+   * Normalize and sanitize analysis output structure
+   */
+  normalizeAnalysisResult(parsed, isResume, documentType, rawText = '', jobDescription = '', persona = 'default', fileName = '') {
+    if (isResume) {
+      const validated = resumeParser.normalizeAndValidate(parsed, rawText, jobDescription);
+      return {
+        ...validated,
+        documentType: 'Resume / CV',
+        language: parsed.language || 'English',
+        confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0.95,
+        riskLevel: parsed.riskLevel || 'low',
+        executiveSummary: parsed.executiveSummary || validated.summary || 'Resume evaluation completed.',
+        plainLanguageSummary: parsed.plainLanguageSummary || 'Candidate qualifications and career profile analysis.',
+        contactInfo: validated.personalInfo,
+        extractedSkills: validated.skills,
+        matchedSkills: validated.jobDescriptionMatch?.matchedSkills || [],
+        missingSkills: validated.jobDescriptionMatch?.missingSkills || [],
+        recommendations: (validated.resumeFeedback?.improvements || []).map(imp => ({ action: imp, rationale: 'Actionable ATS and recruiter enhancement' })),
+        actionItems: validated.resumeFeedback?.improvements || [],
+        suggestions: validated.resumeFeedback?.improvements || [],
+        importantClauses: [],
+        redFlags: [],
+        financialObligations: [],
+        importantDates: [],
+        missingClauses: [],
+        hiddenCaveats: []
+      };
+    }
+
+    return legalAnalysisService.normalizeAndValidate(parsed, rawText, persona, fileName, documentType);
   }
 
   /**

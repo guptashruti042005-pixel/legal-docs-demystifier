@@ -12,15 +12,15 @@ class EmbeddingService {
   init() {
     if (!this.genAI && process.env.GEMINI_API_KEY) {
       this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      this.model = this.genAI.getGenerativeModel({ model: 'text-embedding-004' });
+      this.model = this.genAI.getGenerativeModel({ model: 'gemini-embedding-001' });
     }
   }
 
   /**
    * Generates embedding vector for a given text.
-   * Google's text-embedding-004 model generates 768-dimensional vectors.
+   * Google's gemini-embedding-001 model generates embedding vectors.
    * @param {string} text - Text to embed
-   * @returns {Promise<Array<number>>} 768-dimensional float array
+   * @returns {Promise<Array<number>>} Embedding float array
    */
   async generateEmbedding(text) {
     this.init();

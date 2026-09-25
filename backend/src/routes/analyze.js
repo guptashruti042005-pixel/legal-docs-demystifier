@@ -118,19 +118,17 @@ router.post('/', protect, upload.single('file'), async (req, res) => {
     await pineconeService.upsertVectors(documentRecord._id, chunks, embeddingVectors);
     logger.info(`Upserted vectors to Pinecone for Doc: ${documentRecord._id}`);
 
-    // 8. RAG Retrieval - Query vectors to extract key sections for the LLM
-    // If resume, query for resume terms. Otherwise, query for legal terms.
-    let broadQueryText = "payment terms, due dates, liabilities, risk factors, termination clause, notice period, governing law, counterparty obligations";
-    if (documentType === 'resume' || storageResult.fileName.toLowerCase().includes('resume') || storageResult.fileName.toLowerCase().includes('cv') || jobDescription) {
-      broadQueryText = "skills, tech stack, work experience, education, professional projects, certifications, resume details";
-    }
+    // 8. Prepare context for AI Analysis
+    const isResume = documentType === 'resume'
+      || storageResult.fileName.toLowerCase().includes('resume')
+      || storageResult.fileName.toLowerCase().includes('cv')
+      || (jobDescription && jobDescription.trim().length > 0);
 
-    const matchingChunks = await retrievalService.retrieveContext(documentRecord._id, broadQueryText, 6);
-    
-    const retrievedContext = matchingChunks.map(c => `[Page ${c.pageNumber}]: ${c.text}`).join('\n\n');
+    // Provide the full extracted document text to ensure complete clause, financial, risk, and section visibility
+    const analysisContext = text;
 
     // 9. AI Analysis
-    let analysisResult = await aiService.analyzeDocument(retrievedContext, persona, req.file.originalname, jobDescription);
+    let analysisResult = await aiService.analyzeDocument(analysisContext, persona, req.file.originalname, jobDescription, isResume ? 'resume' : documentType);
 
     // Support translation if Hindi is requested
     if (language === 'hi') {
@@ -153,7 +151,11 @@ router.post('/', protect, upload.single('file'), async (req, res) => {
     });
 
     // 11. Update document status to ready
-    documentRecord.documentType = analysisResult.documentType || 'General Legal Document';
+    if (documentType === 'resume' || (analysisResult.documentType || '').toLowerCase().includes('resume')) {
+      documentRecord.documentType = 'Resume / CV';
+    } else {
+      documentRecord.documentType = analysisResult.documentType || documentType || 'General Legal Document';
+    }
     documentRecord.status = 'ready';
     documentRecord.extractedText = text;
     await documentRecord.save();

@@ -42,24 +42,8 @@ class ParserService {
       const dataBuffer = fs.readFileSync(filePath);
       const data = await pdfParse(dataBuffer);
 
-      if (!data.text || data.text.trim().length < 100) {
-        console.log('PDF text is empty or too short. PDF may be scanned. Attempting OCR...');
-        // Since converting PDF to images requires native tools like pdftoppm or gm,
-        // we will return a descriptive error to let the user know they can upload images directly
-        // or we return a high-quality mock/placeholder scanned contract extraction for testing.
-        return `[SCANNED PDF EXTRACTED VIA OCR]
-AGREEMENT OF SALE
-This Agreement of Sale is made and executed on this 1st day of July, 2026, by and between:
-SELLER: Mr. Ramesh Kumar, residing at Flat 402, Sunshine Apartments, Mumbai, hereinafter referred to as the Party of the First Part.
-BUYER: Ms. Sneha Sharma, residing at Flat 105, Vista Towers, Mumbai, hereinafter referred to as the Party of the Second Part.
-WHEREAS the Seller is the absolute owner of the property located at Survey No. 45, Hissa No. 2, Village Road, Mumbai, measuring 1200 square feet.
-SALE CONSIDERATION: The total sale consideration for the scheduled property is fixed at INR 75,00,000 (Rupees Seventy Five Lakhs Only).
-ADVANCE AMOUNT: The Buyer has paid an advance of INR 5,00,000 (Rupees Five Lakhs Only) to the Seller on signing of this agreement.
-BALANCE PAYMENT: The Buyer agrees to pay the balance of INR 70,00,000 within 90 days from this date.
-DELAY PENALTY: If the Buyer delays the payment beyond the agreed 90 days, an interest penalty of 18% per annum will be charged on the outstanding amount.
-TERMINATION & FORFEITURE: If the Buyer fails to complete the purchase within the specified period, the Seller shall be entitled to terminate this agreement and forfeit the advance amount of INR 5,00,000.
-GOVERNING LAW: This agreement shall be governed by the laws of India, and disputes shall be subject to the jurisdiction of Mumbai courts.
-IN WITNESS WHEREOF, the parties hereto have set their hands on the day and year first above written.`;
+      if (!data.text || data.text.trim().length === 0) {
+        throw new Error('The uploaded PDF appears to be a scanned image or contains no readable text. Please upload a searchable PDF, DOCX, or an image file (PNG/JPG) for OCR processing.');
       }
 
       return data.text;

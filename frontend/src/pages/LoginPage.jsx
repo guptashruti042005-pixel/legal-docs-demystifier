@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Mail, Lock, AlertCircle, ArrowRight, CheckCircle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight, CheckCircle } from 'lucide-react';
 import toast from '../utils/toast';
 import { apiFetch } from '../utils/api';
 
@@ -12,6 +12,7 @@ const LoginPage = () => {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -26,6 +27,7 @@ const LoginPage = () => {
   const [showReset, setShowReset] = useState(false);
   const [resetTokenInput, setResetTokenInput] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [resetSuccess, setResetSuccess] = useState('');
 
   const handleSubmit = async (e) => {
@@ -107,42 +109,43 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="container-md section flex justify-center items-center" style={{ minHeight: 'calc(100vh - 64px)' }}>
-      <div className="card w-full max-w-md p-8 animate-fade-in">
+    <div className="container-md flex justify-center items-center py-8 sm:py-12 px-4" style={{ minHeight: 'calc(100vh - 64px)' }}>
+      <div className="card w-full max-w-md p-6 sm:p-8 animate-fade-in">
         <h2 className="text-center font-display font-bold mb-2 text-[var(--text-primary)]">Welcome Back</h2>
         <p className="text-center text-xs text-[var(--text-secondary)] mb-6">Access your legal document demystifier tools</p>
 
         {error && (
-          <div className="p-3 bg-red-100 text-red-800 rounded flex items-center gap-2 mb-4 text-xs font-semibold">
-            <AlertCircle size={16} />
+          <div className="p-3 bg-red-100 dark:bg-red-950/40 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-900/50 rounded-lg flex items-center gap-2 mb-4 text-xs font-semibold">
+            <AlertCircle size={16} className="shrink-0 text-red-600 dark:text-red-400" />
             <span>{error}</span>
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <div className="form-group mb-0">
             <label className="form-label" htmlFor="email">Email Address</label>
             <div className="relative">
               <input
                 id="email"
                 type="email"
-                className="form-input pl-10"
+                className="form-input has-icon-left"
                 placeholder="name@company.com"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
+                autoComplete="email"
               />
-              <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+              <Mail size={18} className="input-icon-left" />
             </div>
           </div>
 
-          <div className="form-group">
-            <div className="flex justify-between items-center mb-1">
+          <div className="form-group mb-0">
+            <div className="flex justify-between items-center mb-2">
               <label className="form-label mb-0" htmlFor="password">Password</label>
               <button
                 type="button"
                 onClick={() => { setShowForgot(true); setForgotError(''); setForgotSuccess(''); }}
-                className="text-xs text-[var(--primary)] hover:underline font-semibold"
+                className="text-xs text-[var(--primary)] hover:underline font-semibold focus:outline-none"
               >
                 Forgot Password?
               </button>
@@ -150,20 +153,30 @@ const LoginPage = () => {
             <div className="relative">
               <input
                 id="password"
-                type="password"
-                className="form-input pl-10"
+                type={showPassword ? 'text' : 'password'}
+                className="form-input has-icon-both"
                 placeholder="••••••••"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
+                autoComplete="current-password"
               />
-              <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+              <Lock size={18} className="input-icon-left" />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="input-icon-right"
+                title={showPassword ? 'Hide password' : 'Show password'}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
           </div>
 
           <button
             type="submit"
-            className="btn btn-primary w-full mt-4 flex items-center justify-center gap-2"
+            className="btn btn-primary w-full mt-2 flex items-center justify-center gap-2"
             disabled={submitting}
           >
             {submitting ? 'Signing In...' : 'Sign In'} <ArrowRight size={16} />
@@ -259,15 +272,27 @@ const LoginPage = () => {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">New Password</label>
-                  <input
-                    type="password"
-                    className="form-input"
-                    placeholder="Min 6 characters"
-                    value={newPassword}
-                    onChange={e => setNewPassword(e.target.value)}
-                    required
-                  />
+                  <label className="form-label" htmlFor="new-password">New Password</label>
+                  <div className="relative">
+                    <input
+                      id="new-password"
+                      type={showNewPassword ? 'text' : 'password'}
+                      className="form-input has-icon-right"
+                      placeholder="Min 6 characters"
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="input-icon-right"
+                      title={showNewPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
                 <div className="flex gap-3 justify-end mt-6">
                   <button
