@@ -2,10 +2,15 @@ const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 
-// Ensure log directory exists
+const { isServerless } = require('./paths');
+
 const logDir = path.join(__dirname, '..', '..', 'logs');
-if (!fs.existsSync(logDir)) {
-  fs.mkdirSync(logDir, { recursive: true });
+if (!isServerless && !fs.existsSync(logDir)) {
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+  } catch (err) {
+    console.warn(`[Logger] Could not create log directory at ${logDir}: ${err.message}`);
+  }
 }
 
 const levels = {
@@ -35,13 +40,18 @@ const format = winston.format.combine(
 );
 
 const transports = [
-  new winston.transports.Console(),
-  new winston.transports.File({
-    filename: path.join(logDir, 'error.log'),
-    level: 'error',
-  }),
-  new winston.transports.File({ filename: path.join(logDir, 'combined.log') }),
+  new winston.transports.Console()
 ];
+
+if (!isServerless) {
+  transports.push(
+    new winston.transports.File({
+      filename: path.join(logDir, 'error.log'),
+      level: 'error',
+    }),
+    new winston.transports.File({ filename: path.join(logDir, 'combined.log') })
+  );
+}
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',

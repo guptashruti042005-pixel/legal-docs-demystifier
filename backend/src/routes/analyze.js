@@ -18,14 +18,11 @@ const logger = require('../config/logger');
 
 const router = express.Router();
 
-// Multer Disk storage configurations
-const uploadDir = path.join(__dirname, '..', '..', 'uploads');
-if (!require('fs').existsSync(uploadDir)) {
-  require('fs').mkdirSync(uploadDir, { recursive: true });
-}
+// Multer Disk storage configurations (serverless safe)
+const { uploadsDir } = require('../config/paths');
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
+  destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, `${uuidv4()}${path.extname(file.originalname)}`)
 });
 

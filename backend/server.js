@@ -24,11 +24,8 @@ const PORT = process.env.PORT || 3001;
 // Connect to MongoDB
 connectDB();
 
-// Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+// Upload directory configuration (serverless safe)
+const { uploadsDir, isServerless } = require('./src/config/paths');
 
 // Security headers with Helmet
 app.use(helmet({
@@ -116,14 +113,16 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`\n🚀 Legal Docs Demystifier Backend`);
-  console.log(`   Server running at http://localhost:${PORT}`);
-  console.log(`   API Docs: http://localhost:${PORT}/api/docs`);
-  console.log(`   Health check: http://localhost:${PORT}/api/health`);
-  console.log(`   Gemini AI: ${process.env.GEMINI_API_KEY ? '✅ Available' : '⚠️  Not Configured (using GPT-4o fallback or offline model)'}`);
-  console.log(`   OpenAI AI: ${process.env.OPENAI_API_KEY ? '✅ Available' : '❌ Not Configured'}`);
-  console.log(`   Frontend served from: ${fs.existsSync(frontendDir) ? '✅ /frontend/dist' : '⚠️  Not built (run npm run build in frontend)'}\n`);
-});
+if (!isServerless && process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`\n🚀 Legal Docs Demystifier Backend`);
+    console.log(`   Server running at http://localhost:${PORT}`);
+    console.log(`   API Docs: http://localhost:${PORT}/api/docs`);
+    console.log(`   Health check: http://localhost:${PORT}/api/health`);
+    console.log(`   Gemini AI: ${process.env.GEMINI_API_KEY ? '✅ Available' : '⚠️  Not Configured (using GPT-4o fallback or offline model)'}`);
+    console.log(`   OpenAI AI: ${process.env.OPENAI_API_KEY ? '✅ Available' : '❌ Not Configured'}`);
+    console.log(`   Frontend served from: ${fs.existsSync(frontendDir) ? '✅ /frontend/dist' : '⚠️  Not built (run npm run build in frontend)'}\n`);
+  });
+}
 
 module.exports = app;

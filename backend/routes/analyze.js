@@ -8,9 +8,11 @@ const { runOfflineAnalysis } = require('../services/analysisEngine');
 
 const router = express.Router();
 
+const { uploadsDir } = require('../src/config/paths');
+
 // Multer configuration
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, '..', 'uploads')),
+  destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, `${uuidv4()}${path.extname(file.originalname)}`)
 });
 
